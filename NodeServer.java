@@ -15,16 +15,17 @@ public class NodeServer implements Runnable{
 	private DataOutputStream out = null;
 	private Thread client = null;
 	public boolean running = true;
-	public final int INFINITY = Integer.MAX_VALUE;
+	public final int INFINITY = /*Integer.MAX_VALUE*/9999;
 	Vector<Client> clients = new Vector<>();
 	int clientCount = 0;
-	int vertices;
+	public int vertices;
 	public int interval = 0;
 	public int packets = 0;
-	int[][] graph;
-	int[][] routingTable;
-	int[][] connections;
-	int hostID;
+	public String[] ids;
+	public int[][] graph;
+	public int[][] routingTable;
+	public int[][] connections;
+	public int hostID;
 	Thread myServer;
 	String address;
 
@@ -33,65 +34,94 @@ public class NodeServer implements Runnable{
 	public NodeServer(String address, int port) throws IOException {
 		this.port = port;
 		this.address = address;
-		graph = new int[vertices][vertices];//initial graph before distance routing algorithm
-		routingTable = new int[vertices][vertices];//final graph after distance routing algorithm
-		connections = new int[vertices][vertices];//graph of where each node was last connected to (if neighbor than default is itself and it doesn't store costs)
-		initializeGraphs();
 		server = new ServerSocket(port);
 		myServer = new Thread(this);
 		myServer.start();
+	}
+	public void packetInterval() {
 		Thread updates = new Thread(new Runnable() {
 			@Override
 			public void run() {
 				while(running) {
-					updateTab();
+					updateTables();
 					try {
 						Thread.sleep(interval);
-					} catch (InterruptedException e) {
+						updateTables();
+						sendUpdate(makePacket());
+					} catch (IOException | InterruptedException e1) {
 					}
 				}
 			}
 		});
 		updates.start();
+		System.out.println("Server is running");
 	}
 //Create Routing Table and Update it////////////////////////////////////////////////////////////////////////////////////////////////////////////
-	public void initializeGraphs() {
+	public void initializeGraph() {
 		for(int x = 0; x < vertices; x++) {
 			for(int y = 0; y < vertices; y++) {
 				if(x == y) {
 					graph[x][y] = 0;
+				}
+				else {
+					graph[x][y] = INFINITY;
+				}
+			}
+		}
+	}
+	public void initializeGraphs() {
+		for(int x = 0; x < vertices; x++) {
+			for(int y = 0; y < vertices; y++) {
+				if(x == y) {
 					routingTable[x][y] = 0;
 					connections[x][y] = x;
 				}
 				else {
-					graph[x][y] = INFINITY;
 					routingTable[x][y] = INFINITY;
-					connections[x][y] = vertices * vertices;
+					connections[x][y] = INFINITY;
 				}
 			}
 			
 		}
-		updateTab();
 	}
-	public void updateTab() {
-		for(int i = 0; i < vertices; i++) {
+	public void updateTables() {
+		for(int x = 0; x < vertices; x++) {
+			for(int y = 0; y < vertices; y++) {
+				if(x == y) {
+					routingTable[x][y] = 0;
+					connections[x][y] = x;
+				}
+				else {
+					routingTable[x][y] = INFINITY;
+					connections[x][y] = INFINITY;
+				}
+			}
+			
+		}
+		int node = 0;
+		for(int i = 0; i < vertices * 4; i++) {
 			for(int x = 0; x < vertices; x++) {
-				if(graph[i][x] != INFINITY) {
-					int cost = graph[i][x];
+				if(this.graph[node][x] != INFINITY) {
+					int cost = this.graph[node][x];
 					for(int y = 0; y < vertices; y++) {
-						int midCost = routingTable[x][y];
-						if(connections[x][y] == i) {
-							midCost = INFINITY;
+						int prevCost = this.routingTable[x][y];
+						if(connections[x][y] == node) {
+							prevCost = INFINITY;
 						}
-						if(cost + midCost < routingTable[i][x]) {
-							routingTable[i][y] = cost + midCost;
-							connections[i][y] = x;
+						if(cost + prevCost < this.routingTable[node][y]) {
+							this.routingTable[node][y] = cost + prevCost;
+							this.connections[node][y] = x;
 						}
 					}
 				}
 			}
+			node++;
+			if(node == vertices) {
+				node = 0;
+			}
 		}
 	}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	public String makePacket() {
 		String newPacket = vertices + "\n";
@@ -101,6 +131,7 @@ public class NodeServer implements Runnable{
 		return newPacket;
 	}
 	public void  readPacket(String packet) {
+		packets++;
 		Scanner sc = new Scanner(packet);
 		int fields = sc.nextInt();
 		for(int i = 0; i < fields; i++) {
@@ -112,34 +143,52 @@ public class NodeServer implements Runnable{
 			graph[id1][id2] = cost;
 			graph[id2][id1] = cost;
 		}
+		updateTables();
 		sc.close();
 	}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	public void close() throws IOException {
+		for(int i =0; i < vertices; i++) {
+			graph[hostID - 1][i] = INFINITY;
+			graph[i][hostID - 1] = INFINITY;
+		}
+		this.updateTables();
 		while(!clients.isEmpty()) {
 			this.termClient(1);
 		}
 		running = false;;
 		server.close();
 	}
+	public int getPacketsSent() {
+		int current = packets;
+		packets = 0;
+		return current;
+	}
 	
 	public void addClient(String newAdd, int newPort) throws UnknownHostException, IOException {
 		int id = 0;
+		boolean found = false;
 		boolean isListed = false;
 		for(int i = 0; i < clientCount; i++) {
-			if (clients.get(i).address == newAdd && clients.get(i).port == newPort) {
+			if (clients.get(i).address.equals(newAdd) && clients.get(i).port == newPort) {
 				isListed = true;
 			}
 		}
 		if (isListed) {
-			System.out.println("This client has already been added.");
 		} 
 		else {
+			for(int i = 0; i < vertices && !found; i++) {
+				String info[] = ids[i].split(" ");
+				if(info[0].equals(newAdd) && Integer.parseInt(info[1]) == newPort) {
+					id = i + 1;
+					found = true;
+				}
+			}
 			Socket socket = new Socket(newAdd, newPort);
 			DataInputStream newIn = new DataInputStream(socket.getInputStream());
 			DataOutputStream newOut = new DataOutputStream(socket.getOutputStream());
 			newOut.writeUTF(address+":" + port);
 			Client client = new Client(socket, newIn, newOut, this, clientCount, newAdd, newPort, id);
-		//this will send all of the clients to the other server
 			Thread cli = new Thread(client);
 			clients.add(client);
 			cli.start();
@@ -150,14 +199,21 @@ public class NodeServer implements Runnable{
 	public void run() {
 		try {
 			while(running) {
+				boolean found = true;
 				int id = 0;
 				Socket socket = server.accept();
 				DataInputStream newIn = new DataInputStream(socket.getInputStream());
 				DataOutputStream newOut = new DataOutputStream(socket.getOutputStream());
 				String newAdd = newIn.readUTF();
 				String[] sock = newAdd.split(":");
-				//System.out.println("IP: "+sock[0] + " Port: " + Integer.parseInt(sock[1]) + " has joined.");
-				Client client = new Client(socket, newIn, newOut, this, clientCount, sock[0], Integer.parseInt(sock[1]), id);
+				for(int i = 0; i < ids.length && !found; i++) {
+					String info[] = ids[i].split(" ");
+					if(info[0].equals(sock[0]) && Integer.parseInt(sock[1]) == port) {
+						id = i + 1;
+						found = true;
+					}
+				}
+				Client client = new Client(socket, newIn, newOut, this, clientCount, sock[0], Integer.parseInt(sock[1]), id+1);
 				Thread cli = new Thread(client);
 				clients.add(client);
 				cli.start();
@@ -167,41 +223,42 @@ public class NodeServer implements Runnable{
 
 		}
 		catch (IOException e) {
-			System.out.println(e);
 		}
 	}
-	/*
-	public void makeTopologyMap() throws FileNotFoundException {
-		String ip_1, ip_2;
-		int port_1, port_2, cost;
-		File map = new File("Something.txt");
-		Scanner sc = new Scanner(map);
-		while(sc.hasNextLine()) {
-			ip_1 = sc.next();
-			port_1 = sc.nextInt();
-			ip_2 = sc.next();
-			port_2 = sc.nextInt();
-			cost = sc.nextInt();
-		}
-	}
-	*/
-	public void clientListToString() {
-		System.out.println("IP Address\t        Port");
-		for(int i = 0; i < clients.size(); i++) {
-			System.out.println((i+1) +". " +  clients.get(i).address + "\t" + clients.get(i).port);
-		}
-		
+	public void printRoutingTable() {
+        for (int i = 0; i < vertices; i++) {
+        	for (int j = 0; j < vertices; j++) {
+        		if(i != j) {
+        			System.out.println((i + 1) + " " + (j + 1) + " " + routingTable[i][j]);
+        		}
+        	}
+        }
 	}
 	public int getPort() {
 		return port;
 	}
-	public void termClient(int id) throws IOException {
-		if (!clients.isEmpty()) {
-			clients.get(id-1).out.writeUTF("4term78");
+	public void sendUpdate(String packet) throws IOException {
+		for(int i = 0; i < clients.size(); i++) {
+			clients.get(i).write(packet);
 		}
-		clients.get(id-1).remove();
-		clients.remove(id - 1);
+	}
+	public void termClient(int id) throws IOException {
+		graph[hostID - 1][id - 1] = INFINITY;
+		graph[id - 1][hostID - 1] = INFINITY;
+		this.sendUpdate(this.makePacket());
+		int index = 0;
+		for(int i = 0; i < clients.size(); i++) {
+			if((clients.get(i).id) == id) {
+				index = i;
+			}
+		}
+		if (!clients.isEmpty()) {
+			clients.get(index).out.writeUTF("4term78");
+		}
+		clients.get(index).remove();
+		clients.remove(index);
 		clientCount--;
+		this.updateTables();
 		System.out.println("User " + id + " has disconnected.");
 	}
 	public void disconnect(Client cli) {
@@ -214,5 +271,15 @@ public class NodeServer implements Runnable{
 		clients.remove(id);
 		clientCount--;
 		System.out.println("User " + (id + 1) + " has disconnected.");
+	}
+	public void setIDs() {
+		for(int i = 0; i < clients.size(); i++) {
+			for(int j = 0; j < vertices; j++) {
+				String info[] = ids[j].split(" ");
+				if(clients.get(i).port == Integer.parseInt(info[1]) && clients.get(i).address.equals(info[0])) {
+					clients.get(i).id = j + 1;
+				}
+			}
+		}
 	}
 }

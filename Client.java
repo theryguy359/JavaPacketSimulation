@@ -28,13 +28,6 @@ public class Client implements Runnable{
 						String serverMessage = in.readUTF();
 						String[] buff = serverMessage.split(" ");
 						switch (buff[0]) { //terminate, datagram recieved
-							case("5tht"): { //add client
-								String newAddress = buff[1];
-								System.out.println("The new address is: " + newAddress);
-								int newPort = Integer.parseInt(buff[2]);
-								myServer.addClient(newAddress, newPort);
-								break;
-							}
 							case("4term78"): { //terminate
 								myServer.disconnect(cli);
 								running = false;
@@ -42,29 +35,24 @@ public class Client implements Runnable{
 								break;
 							}
 							case("gh123"): {
-								System.out.println("Connection to "+ address+" " + port +" was successful");
 								break;
 							}
-							default: {//print message received message
-								System.out.println("Message recieved from " + address);
-								System.out.println("Sender's Port: " + port);
-								System.out.println("Message: " + serverMessage.substring(1));
+							default: {//datagram received
+								System.out.println("RECEIVED A MESSAGE FROM SERVER " + id);
+								myServer.readPacket(serverMessage);
 								break;
 							}
 						}
 					}
 					catch (IOException e){
-						System.out.println(e);
 					}
 				}
 	}
 	public Socket getSocket() {
 		return socket;
 	}
-	//add give method that takes a client
-	public void write(String message) throws IOException {
-		out.writeUTF(message);
-		System.out.println("Message sent.");
+	public void write(String packet) throws IOException {
+		out.writeUTF(packet);
 	}
 	public void remove() throws IOException {
 		running = false;
